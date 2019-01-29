@@ -514,7 +514,7 @@ void menuBleScan()
 
 void menuActionBleScan ()
 {
-	debug (F("in blescan"));
+	//debug (F("in blescan"));
 
 
 	char discoveryNames[BLE_DISCOVER_ENTRY_COUNT][BLE_DISCOVER_NAME_LENGTH];
@@ -596,7 +596,9 @@ void menuActionBleScan ()
 	debug(discoveryAddress[2]);
 
 	debug(F("names end "));
-	debug(F("index: " + String(index)));
+	debug(F("index: "));
+	debug(String(index));
+	debug(F("\n"));
 
 
 	// display names on display
