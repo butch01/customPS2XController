@@ -9,6 +9,9 @@
 
 /* define debug stuff */
 #define DEBUG_FREE_MEMORY 0
+#define DEBUG_BLE_AT 1
+#define DEBUG 1
+
 
 
 // set 5 if 16Mhz Arduino, set 3.3 if 8Mhz Arduino
@@ -38,9 +41,14 @@ unsigned long lastVoltagePrinted=0;
 #define BT_RX 10
 #define BT_TX 11
 #define BLE_BAUDRATE 19200
-#define BLE_DISCOVER_ENTRY_COUNT 2
+#define BLE_DISCOVER_ENTRY_COUNT 4
 #define BLE_DISCOVER_NAME_LENGTH 14
 #define BLE_DISCOVER_ADDRESS_LENGTH 12
+#define BLE_AT_DELAY 30
+
+#define BLE_CONNECT_ERROR_CODE_OK 0
+#define BLE_CONNECT_ERROR_CODE_ERROR 1
+#define BLE_CONNECT_ERROR_CODE_FAIL 2
 
 /* SERIAL */
 #define SERIAL_BAUD 19200
@@ -76,7 +84,33 @@ unsigned long lastMemoryStatsMillis = 0;
 //U8X8_SSD1306_128X32_UNIVISION_SW_I2C display(/* clock=*/ SCL, /* data=*/ SDA, /* reset=*/ U8X8_PIN_NONE);   // Adafruit Feather ESP8266/32u4 Boards + FeatherWing OLED
 U8X8_SH1106_128X64_NONAME_HW_I2C display (/* reset=*/ U8X8_PIN_NONE);
 
-bool isModelChoosen=true;
+// cursor position by user
+uint8_t menuCursorUserY = 2;
+bool	isCursorChanged = true;
+#define DISPLAY_NUMBER_OF_LINES 8
+
+
+
+
+
+uint8_t menuAction = 0;
+#define MENU_ACTION_NONE 0
+#define MENU_ACTION_START 1
+#define MENU_ACTION_CANCEL 2
+#define MENU_ACTION_SELECT 3
+#define MENU_ACTION_SELECT_ALT 4
+
+// uint8_t menuSubId=0;
+
+// define MENU_IDS
+#define MENU_ID_NONE 0
+#define MENU_ID_MAIN 1
+#define MENU_ID_PROTOCOL_CHOOSER 2
+#define MENU_ID_BLE_SCAN 3
+
+uint8_t menuIdToShow 		= MENU_ID_MAIN; // default menu
+bool 	isMenuMode 			= true;
+uint8_t menuNumberOfEntries = 0;
 
 
 // create serial communication to BLE HM-10 / HM-11 device
@@ -146,6 +180,34 @@ void printDebug()
 
 }
 
+
+/**
+ * logs if DEBUG_BLE_AT is defined
+ */
+void logBLEAT (String logString)
+{
+	#ifdef DEBUG_BLE_AT
+	if (Serial.availableForWrite())
+	{
+		Serial.print (logString);
+	}
+	#endif
+}
+
+
+/**
+ * logs if DEBUG is defined
+ */
+void debug (String logString)
+{
+	#ifdef DEBUG
+	if (Serial.availableForWrite())
+	{
+		Serial.print (logString);
+	}
+	#endif
+}
+
 void displayDebug()
 {
 	if (millis() - lastVoltagePrinted > (unsigned long) VOLTAGE_READ_INTERVAL_MS)
@@ -157,13 +219,19 @@ void displayDebug()
 
 }
 
+void displayWriteHeadline(char *headline)
+{
+	display.clearLine(0);
+	display.clearLine(1);
+	display.setCursor(0, 0);
+	display.print(headline);
+}
+
 void displayWriteEntry(uint8_t lineNumber, char* stringToWrite)
 {
 	display.clearLine(2+lineNumber);
 	display.setCursor(3, 2+lineNumber);
 	display.print(stringToWrite);
-
-
 }
 
 void setup() {
@@ -173,9 +241,9 @@ void setup() {
 
 	stickReverse[TRIM_LY]=true;
 	display.begin();
-	delay (200);
+	delay (BLE_AT_DELAY);
 	display.setPowerSave(0);
-	//display.clear();
+	display.clear();
 	display.setFont(u8x8_font_chroma48medium8_r);
 ////	display.setContrast(255);
 
@@ -266,14 +334,21 @@ void setup() {
 
 	//delay(2000);
 	bleSerial.begin(BLE_BAUDRATE);
-	delay(200);
+	delay(BLE_AT_DELAY);
+
+	Serial.println(F("AT"));
+	bleSerial.println(F("AT"));
+	delay(BLE_AT_DELAY);
+	bleReadSerialLogOnly();
+
 	bleSendATWakeUp();
-	delay(200);
-	bleReadSerial();
+	delay(BLE_AT_DELAY);
+	bleReadSerialLogOnly();
+
 	Serial.println(F("AT+ROLE1"));
 	bleSerial.println(F("AT+ROLE1"));
-	delay(200);
-	bleReadSerial();
+	delay(BLE_AT_DELAY);
+	bleReadSerialLogOnly();
 
 //	bleSerial.println("AT+BAUD1");
 //	delay(200);
@@ -281,150 +356,422 @@ void setup() {
 
 	Serial.println(F("AT+POWE2"));
 	bleSerial.println(F("AT+POWE2"));
-	delay(100);
-	bleReadSerial();
+	delay(BLE_AT_DELAY);
+	bleReadSerialLogOnly();
+
+	Serial.println(F("AT+NOTI1"));
+	bleSerial.println(F("AT+NOTI1"));
+	delay(BLE_AT_DELAY);
+	bleReadSerialLogOnly();
 
 	Serial.println(F("AT+RESET"));
 	bleSerial.println(F("AT+RESET"));
-	delay(100);
-	bleReadSerial();
+	delay(BLE_AT_DELAY);
+	bleReadSerialLogOnly();
 
-	Serial.println(F("AT"));
-	bleSerial.println(F("AT"));
-	delay(100);
-	bleReadSerial();
 
-	bleReadSerial();
+
+
 
 	Serial.println(F("AT+NAMESENDER"));
 	bleSerial.println(F("AT+NAMESENDER"));
-	delay(100);
-	bleReadSerial();
+	delay(BLE_AT_DELAY);
+	bleReadSerialLogOnly();
 
 
 //	bleSerial.println("AT+CONA20C38FEF6C33");
 //	delay(2000);
 	// bleSerial.println("AT+CONN1");
 
-	bleScan();
-	delay(5);
-	//bleReadSerial();
+	//bleScan();
+
 	Serial.println(F("setup end"));
 }
 
 
-
-
-void bleScan ()
+/**
+ *  returns selected element (cursor position minus 2 (number of headlines)
+ */
+uint8_t getSelectedElementId()
 {
+	return menuCursorUserY -2;
+}
 
-	printSerialFreeMemory();
-	displayWriteEntry(2, "Hallo");
-	displayWriteEntry(4, "test");
-	//char discoveryNames[BLE_DISCOVER_ENTRY_COUNT][BLE_DISCOVER_NAME_LENGTH];
-	//char discoveryAddress[BLE_DISCOVER_ENTRY_COUNT][BLE_DISCOVER_ADDRESS_LENGTH];
+/**
+ * resets the menuAction.
+ */
+void menuActionReset()
+{
+	menuAction = MENU_ACTION_NONE;
+}
 
-	printSerialFreeMemory();
+/**
+ * main menu
+ */
+void menuMain()
+{
+	display.clear();
+	menuNumberOfEntries = 2;
+	displayWriteHeadline("Main");
+	displayWriteEntry(0, "Protocol");
+	bool isBreakWhile = false;
+	while (!isBreakWhile)
+	{
+		// process menu actions. Will return after we select, start, etc. is pressed.
+		processMenuAction();
+
+		if (menuAction == (MENU_ACTION_START || MENU_ACTION_CANCEL || MENU_ACTION_SELECT))
+		{
+			isBreakWhile = true;
+		}
+	}
+
+	menuActionReset();
+
+	// load submenu if seleced
+	if ((menuAction == MENU_ACTION_SELECT) && (getSelectedElementId() == 0))
+	{
+		// load submenu ProtocolChooser
+		menuIdToShow = MENU_ID_PROTOCOL_CHOOSER;
+
+	}
+	else if (menuAction == (MENU_ACTION_START || MENU_ACTION_CANCEL))
+	{
+		// clear display, end menu mode
+		menuIdToShow = MENU_ID_NONE;
+	}
+}
 
 
+void menuProtocolChooser()
+{
+	display.clear();
+	menuNumberOfEntries = 2;
+	displayWriteHeadline("Protocol");
+	displayWriteEntry(0, "LEGO");
+	displayWriteEntry(1, "BLE");
+	bool isBreakWhile = false;
+	while (!isBreakWhile)
+	{
+		processMenuAction();
+		if (menuAction == (MENU_ACTION_CANCEL || MENU_ACTION_SELECT || MENU_ACTION_START))
+		{
+			isBreakWhile = true;
+		}
+	}
+
+	menuActionReset();
+	if (menuAction == (MENU_ACTION_SELECT && (getSelectedElementId() == 0)))
+	{
+		// LEGO selected
+		// not implemented yet
+
+	}
+	else if (menuAction == (MENU_ACTION_SELECT && (getSelectedElementId() == 1)))
+	{
+		// BLE selected
+		// initiate BLE scan
+		menuIdToShow = MENU_ID_BLE_SCAN;
+	}
+	else if (menuAction == MENU_ACTION_CANCEL)
+	{
+		// show upper level (main)
+		menuIdToShow = MENU_ID_MAIN;
+	}
+	else if (menuAction == MENU_ACTION_START)
+	{
+		// end menu
+		menuIdToShow = MENU_ID_NONE;
+	}
+
+}
+
+/**
+ * prints the menu cursor
+ */
+void displayPrintMenuCursor ()
+{
+	for (uint8_t i=0; i< DISPLAY_NUMBER_OF_LINES; i++)
+	{
+		display.setCursor(0, i);
+		if (i != menuCursorUserY)
+		{
+			display.print(' ');
+		}
+		else
+		{
+			display.print('>');
+		}
+	}
+}
+
+void menuBleScan()
+{
+	display.clear();
+	displayWriteHeadline("BLE SCAN");
+	menuActionBleScan();
+}
+
+void menuActionBleScan ()
+{
+	debug (F("in blescan"));
+
+
+	char discoveryNames[BLE_DISCOVER_ENTRY_COUNT][BLE_DISCOVER_NAME_LENGTH];
+	char discoveryAddress[BLE_DISCOVER_ENTRY_COUNT][BLE_DISCOVER_ADDRESS_LENGTH];
+	int  discoveryRSSI[BLE_DISCOVER_ENTRY_COUNT];
 
 	//set results all empty
-//	for (int entry=0; entry < BLE_DISCOVER_ENTRY_COUNT; entry ++)
-//	{
-//		//memset(discoveryNames, 0, sizeof(discoveryAddress));
-//		memset(discoveryAddress, 0, sizeof(discoveryAddress));
-//	}
+	for (int entry=0; entry < BLE_DISCOVER_ENTRY_COUNT; entry ++)
+	{
+		memset(discoveryNames, 0, sizeof(discoveryNames));
+		memset(discoveryAddress, 0, sizeof(discoveryAddress));
+		memset(discoveryRSSI, 0, sizeof(discoveryRSSI));
+	}
 
-	printSerialFreeMemory();
-	// send discovery command
 	bleSerial.println(F("AT+DISC?"));
 
 	// we save our response line here
 	String responseLine = "";
 	responseLine.reserve(64);
 
-
-	printSerialFreeMemory();
-//	char tmpResponse[64]= "";
-
-
-	// clean tmpResponse
-//	memset(tmpResponse, 0, sizeof(tmpResponse));
-
 	bool isResponseCompletelyRead = false;
-	int index = 0;
+	int index = -1; // starting at -1. Will increment on first match if AT+DIS0
 	int lineNumber=0;
 	// read as long as response is not completely read
 	while (!isResponseCompletelyRead)
 	{
-		printSerialFreeMemory();
+		//printSerialFreeMemory();
 		if (bleSerial.available() >0)
 		{
 			// we have data in serial waiting
 			responseLine = bleSerial.readStringUntil('\r');
+			Serial.print(F("lineNumber: "));
 			Serial.print(lineNumber);
 
 			Serial.println(responseLine);
-//			// search for Name starting with MYRC
-//			if (strstr(tmpResponse, "OK+NAME:MYRC_"))
-//			{
-//				//strcat(discoveryNames[index], tmpResponse[13], sizeof(discoveryNames[index]));
-////				Serial.println(sizeof(tmpResponse));
-//			}
-//
-//
-//
+			if (responseLine.indexOf(F("OK+DIS0")) != -1)
+			{
+				// increment index first
+				index++;
+
+				// we have a line containing the address
+				Serial.println(responseLine.substring(responseLine.indexOf(":")+1, responseLine.indexOf(":") +1 + 12));
+				responseLine.substring(responseLine.indexOf(":")+1, responseLine.indexOf(":") +1 + 12).toCharArray(discoveryAddress[index], BLE_DISCOVER_ADDRESS_LENGTH+1);
+
+
+				// also check if RSSI is available, save this too.
+				if (int a= responseLine.indexOf(F("RSSI:")) != -1)
+				{
+					discoveryRSSI[index] = responseLine.substring(a+5).toInt();
+				}
+
+			}
+			// search for Name starting with MYRC
+			else if (responseLine.indexOf(F("OK+NAME")) != -1)
+			{
+				// we have a name
+				Serial.println(responseLine.substring(responseLine.indexOf(":")+1));
+				responseLine.substring(responseLine.indexOf(":")+1).toCharArray(discoveryNames[index], BLE_DISCOVER_NAME_LENGTH, 0);
+			}
 			// check for end sequence
-//			if (strstr(responseLine, "OK+DISCE"))
-//			{
-//				isResponseCompletelyRead=true;
-//			}
-			if (responseLine.indexOf(F("OK+DISCE")!=-1))
+			else if (responseLine.indexOf(F("OK+DISCE"))!=-1)
 			{
 				isResponseCompletelyRead=true;
 			}
-
-//			int firstDelimiter = line.indexOf(':');
-//			if (firstDelimiter != -1 )
-//			{
-//				// we jave a match. Line looks like OK+DIS0:78C5E56D8BCDOK+RSSI:-045
-//				// get the address
-//				Serial.println( firstDelimiter);
-//				int secondDelimter = line.lastIndexOf(':');
-//				String address = line.substring(firstDelimiter+1, line.indexOf('+',firstDelimiter));
-//				//int rssi = line.substring(line.lastIndexOf(':')+1);
-//
-//				Serial.print("address: ");
-//				Serial.println(address);
-//				Serial.print("rssi: ");
-//				Serial.println(rssi);
-
-
-//			}
-
-
-
 			lineNumber++;
 
 
 		}
 
-
-
 	}
 
-	//if (bleSerial.available() >0)
-//	{
-//		response = response + bleSerial.readString();
-//		if (! response.indexOf("OK+DISCE") > 0)
-//		{
-//
-//		}
-//	}
+	debug(F("names: "));
+	debug(discoveryNames[0]);
+	debug(discoveryNames[1]);
+	debug(discoveryNames[2]);
+
+	debug(discoveryAddress[0]);
+	debug(discoveryAddress[1]);
+	debug(discoveryAddress[2]);
+
+	debug(F("names end "));
+	debug(F("index: " + String(index)));
+
+
+	// display names on display
+	for (uint8_t i=0; i<= index; i++)
+	{
+		displayWriteEntry(i, discoveryNames[i]);
+		Serial.println(discoveryNames[i]);
+	}
+
+	bool isBreakWhile=false;
+
+	// stay in loop until an entry is selected
+	while (!isBreakWhile)
+	{
+		processMenuAction();
+		menuNumberOfEntries = index;
+
+		if (menuAction == (MENU_ACTION_CANCEL || MENU_ACTION_SELECT || MENU_ACTION_START))
+		{
+			isBreakWhile = true;
+		}
+	}
+
+	menuActionReset();
+
+	if (menuAction == MENU_ACTION_SELECT)
+	{
+		// we want to connect to a device
+
+		// check if we selected a valid BLE device. If so, connect to it
+		// if ((menuCursorUserY -2) <= index)
+		//{
+		// we have a valid match
+		//uint8_t connStatus = bleConnect (discoveryAddress[menuCursorUserY-2]);
+		uint8_t connStatus = bleConnect (discoveryAddress[getSelectedElementId()]);
+		display.clear();
+
+		switch (connStatus)
+		{
+			case BLE_CONNECT_ERROR_CODE_ERROR:
+				displayWriteEntry(4, "ERROR!");
+				break;
+
+			case BLE_CONNECT_ERROR_CODE_FAIL:
+				displayWriteEntry(4, "FAILED");
+				break;
+
+			case BLE_CONNECT_ERROR_CODE_OK:
+				displayWriteEntry(4, "CONNECTED");
+				isMenuMode = false;
+				break;
+
+		}
+
+			//}
+
+	}
+	else if (menuAction == MENU_ACTION_CANCEL)
+	{
+
+		// return to upper menu level (protocol chooser)
+		menuIdToShow = MENU_ID_PROTOCOL_CHOOSER;
+	}
+	else if (menuAction == MENU_ACTION_START)
+	{
+		// end menu
+		menuIdToShow = MENU_ID_NONE;
+	}
 
 	printSerialFreeMemory();
-
+	debug(F("out of blescan"));
 }
+
+
+/**
+ * calls a menu function by an id (menuIdToShow)
+ */
+void menuRouter()
+{
+	switch (menuIdToShow)
+	{
+		case MENU_ID_NONE:
+			isMenuMode = false;
+			break;
+
+		case MENU_ID_MAIN:
+			menuMain();
+			break;
+
+		case MENU_ID_BLE_SCAN:
+			menuBleScan();
+			break;
+
+		case MENU_ID_PROTOCOL_CHOOSER:
+			menuProtocolChooser();
+			break;
+
+	}
+}
+
+
+/**
+ * send at command to connect to a specific address
+ * returns the status
+ * status codes: 0 - OK, 1 - Error, 2 - Failed
+ */
+uint8_t bleConnect(char *deviceAddress)
+{
+
+
+	uint8_t returnCode = 0;
+
+//	char command[18];
+//	memset(command, 0, sizeof(command));
+//	strcpy(command, strcat("AT+CON",deviceAddress));
+	String command = "AT+CON";
+	command.concat(deviceAddress);
+	Serial.print("command: ");
+	Serial.println(command);
+
+	logBLEAT(F("in function bleConnect\n"));
+	logBLEAT(F("Address: "));
+	logBLEAT(deviceAddress);
+	logBLEAT("\n");
+	logBLEAT(F("command:\n"));
+	logBLEAT(command);
+
+	bleSerial.println(command);
+
+	bool isBreakWhile=false;
+
+	// create response string
+	String response;
+	response.reserve(64);
+	Serial.println(F("Response: \n"));
+
+	while (!isBreakWhile)
+	{
+		Serial.println(bleSerial.available());
+		if (bleSerial.available() >0)
+		{
+			// bleSerial.readBytesUntil('\r', response, sizeof(response));
+			// Serial.println(response);
+			response = (bleSerial.readStringUntil('\r'));
+			response.trim();
+
+
+			Serial.println(response);
+
+			if (response.equals(F("OK+CONNE")))
+			{
+				returnCode = BLE_CONNECT_ERROR_CODE_ERROR;
+				isBreakWhile = true;
+			}
+			else if (response.equals(F("OK+CONNF")))
+			{
+				returnCode = BLE_CONNECT_ERROR_CODE_FAIL;
+				isBreakWhile = true;
+			}
+			else if (response.equals(F("OK+CONN")))
+			{
+				returnCode = BLE_CONNECT_ERROR_CODE_OK;
+				isBreakWhile = true;
+			}
+
+			logBLEAT(F("BLE-Connect-Response: "));
+			logBLEAT(response);
+			logBLEAT("\n");
+
+		}
+
+	}
+	return returnCode;
+}
+
 
 /* send long text for wakeup via AT*/
 void bleSendATWakeUp ()
@@ -433,25 +780,31 @@ void bleSendATWakeUp ()
 	bleSerial.println(F("AT"));
 }
 
-void bleReadSerial()
+
+/**
+ * ONLY logs the BLE Serial
+ */
+void bleReadSerialLogOnly()
 {
+
 	if (bleSerial.available() > 0)
 	{
-		Serial.println(bleSerial.readString());
+		logBLEAT(bleSerial.readString());
 	}
-
 }
 
 
-void printSerialFreeMemory() {
-	if (millis() - (unsigned long) DEBUG_PRINT_FREE_MEM_TIMER > lastMemoryStatsMillis)
-	{
-		Serial.print(millis());
-		Serial.print(F(" - freeMemory()="));
-		Serial.println(freeMemory());
-		lastMemoryStatsMillis = millis();
-	}
-
+void printSerialFreeMemory()
+{
+	#ifdef DEBUG_FREE_MEMORY
+		if (millis() - (unsigned long) DEBUG_PRINT_FREE_MEM_TIMER > lastMemoryStatsMillis)
+		{
+			Serial.print(millis());
+			Serial.print(F(" - freeMemory()="));
+			Serial.println(freeMemory());
+			lastMemoryStatsMillis = millis();
+		}
+	#endif
 }
 
 /**
@@ -732,7 +1085,83 @@ void processTrimChange()
 
 }
 
-void loop() {
+/**
+ * calculates new cursor position and update the drawing
+ */
+void processCursorNavigation()
+{
+	if (ps2x.ButtonPressed(PSB_PAD_UP))
+	{
+		if (menuCursorUserY > 2)
+		{
+			menuCursorUserY--;
+			isCursorChanged=true;
+		}
+	}
+	else if (ps2x.ButtonPressed(PSB_PAD_DOWN))
+	{
+		if ((menuCursorUserY < DISPLAY_NUMBER_OF_LINES -1 ) && (menuCursorUserY < 1+ menuNumberOfEntries - 1))
+		{
+			menuCursorUserY++;
+			isCursorChanged=true;
+		}
+	}
+
+	// update cursor position if cursor's position has been changed
+	if (isCursorChanged)
+	{
+		displayPrintMenuCursor();
+	}
+}
+
+
+/**
+ * processes the buttons when you are in menu.
+ * cross:   cancel (one level up)
+ * square:  select / OK
+ * circle:  alternative ection (like edit)
+ * start:   close menu
+ */
+void processMenuAction()
+{
+	bool isBreakWhile = false;
+
+	while (!isBreakWhile)
+	{
+		// update gamepad status
+		ps2x.read_gamepad();
+
+		// process cursor navigation (up down)
+		processCursorNavigation();
+
+		// process menu action buttons for select, cancel, etc.
+		if (ps2x.ButtonPressed(PSB_CROSS))
+		{
+			menuAction = MENU_ACTION_CANCEL;
+			isBreakWhile = true;
+		}
+		else if (ps2x.ButtonPressed(PSB_SQUARE))
+		{
+			menuAction = MENU_ACTION_SELECT;
+			isBreakWhile = true;
+		}
+		else if (ps2x.ButtonPressed(PSB_CIRCLE))
+		{
+			menuAction = MENU_ACTION_SELECT_ALT;
+			isBreakWhile = true;
+		}
+		else if (ps2x.ButtonPressed(PSB_START))
+		{
+			menuAction = MENU_ACTION_START;
+			isBreakWhile = true;
+		}
+	}
+}
+
+
+
+void loop()
+{
 
 
 	/* You must Read Gamepad to get new values and set vibration values
@@ -740,21 +1169,23 @@ void loop() {
 	 if you don't enable the rumble, use ps2x.read_gamepad(); with no values
 	 You should call this at least once a second
 	 */
-	if (error > 0) {	//skip loop if no controller found
-		Serial.print(F("have error: "));
-		Serial.println(error);
-		blinkErrorCode();
-		// displayError();
-	}
-//	else if (!isModelChoosen)
-//	{
-//		displayMenu0();
-//		delay(1000);
-//
-//	}
-	else
+
+	ps2x.read_gamepad(false, vibrate); //read controller and set large motor to spin at 'vibrate' speed
+	if (ps2x.ButtonPressed(PSB_START))
 	{
-		ps2x.read_gamepad(false, vibrate); //read controller and set large motor to spin at 'vibrate' speed
+		// enable menuMode
+		isMenuMode = true;
+	}
+
+	// check if we are in menu mode
+	while (isMenuMode)
+	{
+		// call menuRouter
+		menuRouter();
+	}
+
+
+
 		// check if we are trimming now
 		processTrimChange();
 
@@ -855,15 +1286,15 @@ void loop() {
 //			Serial.print(",");
 //			Serial.println(ps2x.Analog(PSS_RX), DEC);
 //		}
-	}
 
-//	counterDisplay();
-	#ifdef DEBUG_FREE_MEMORY
-		printSerialFreeMemory();
-	#endif
-	// delay(50);
 
-	// update voltage level on display
-	displayDebug();
+	//	counterDisplay();
+//		#ifdef DEBUG_FREE_MEMORY
+//			printSerialFreeMemory();
+//		#endif
+//		// delay(50);
+//
+//		// update voltage level on display
+//		displayDebug();
 
 }
