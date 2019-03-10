@@ -4,6 +4,8 @@
 #include <MemoryFree.h>
 #include <SoftwareSerial.h>
 #include <FastCRC.h>
+#include <LegoIr.h>
+
 
 
 
@@ -49,6 +51,12 @@ unsigned long lastVoltagePrinted=0;
 #define BLE_CONNECT_ERROR_CODE_OK 0
 #define BLE_CONNECT_ERROR_CODE_ERROR 1
 #define BLE_CONNECT_ERROR_CODE_FAIL 2
+
+
+/* LEGO */
+LegoIr pf;
+#define LEGO_IR_PIN 9
+
 
 /* SERIAL */
 #define SERIAL_BAUD 19200
@@ -107,6 +115,7 @@ uint8_t menuAction = 0;
 #define MENU_ID_MAIN 1
 #define MENU_ID_PROTOCOL_CHOOSER 2
 #define MENU_ID_BLE_SCAN 3
+#define MENU_ID_LEGO 4
 
 uint8_t menuIdToShow 		= MENU_ID_MAIN; // default menu
 bool 	isMenuMode 			= true;
@@ -146,6 +155,7 @@ SoftwareSerial bleSerial (BT_RX, BT_TX); // RX, TX
 
 // BT send interval
 #define BT_MIN_SEND_INTERVAL_MILLIS 50
+//#define BT_MIN_SEND_INTERVAL_MILLIS 300
 unsigned long btLastSend=0;
 
 // CRC
@@ -154,11 +164,12 @@ FastCRC8 CRC8;
 // stick adjustment
 #define DEAD_ZONE 20
 
-#define TRIM_LX 0
-#define TRIM_LY 1
-#define TRIM_RX 2
-#define TRIM_RY 3
+#define STICK_LX 0
+#define STICK_LY 1
+#define STICK_RX 2
+#define STICK_RY 3
 char sticksTrim[] = {0,0,0,0};
+float sticksExpo[] = {1.0,1.0,1.0,1.0};
 
 bool stickReverse[] = {false,false,false,false};
 
@@ -208,14 +219,33 @@ void debug (String logString)
 	#endif
 }
 
-void displayDebug()
+void debug (int integer)
+{
+	#ifdef DEBUG
+	if (Serial.availableForWrite())
+	{
+		Serial.print (integer);
+	}
+	#endif
+}
+
+
+/**
+ * update voltage on display
+ */
+void displayVoltage()
 {
 	if (millis() - lastVoltagePrinted > (unsigned long) VOLTAGE_READ_INTERVAL_MS)
 	{
-		display.setCursor(5, 5);
+		display.setCursor(11, 1);
 		display.print(readVoltage(VOLTAGE_PIN_RAW, (float) VOLTAGE_DIVIDE_RESISTOR_1, (float) VOLTAGE_DIVIDE_RESISTOR_2));
 		lastVoltagePrinted = millis();
 	}
+}
+
+void displayDebug()
+{
+
 
 }
 
@@ -239,7 +269,7 @@ void setup() {
 	Serial.begin(SERIAL_BAUD);
 	Serial.println(F("starting"));
 
-	stickReverse[TRIM_LY]=true;
+	stickReverse[STICK_LY]=true;
 	display.begin();
 	delay (BLE_AT_DELAY);
 	display.setPowerSave(0);
@@ -405,48 +435,62 @@ void menuActionReset()
 	menuAction = MENU_ACTION_NONE;
 }
 
+void resetMenuCursor()
+{
+	menuCursorUserY = 2;
+}
+
 /**
  * main menu
  */
 void menuMain()
 {
+	debug (F("menuMain in\n"));
 	display.clear();
-	menuNumberOfEntries = 2;
+	menuNumberOfEntries = 1;
+	resetMenuCursor();
 	displayWriteHeadline("Main");
 	displayWriteEntry(0, "Protocol");
 	bool isBreakWhile = false;
 	while (!isBreakWhile)
 	{
+
 		// process menu actions. Will return after we select, start, etc. is pressed.
 		processMenuAction();
 
-		if (menuAction == (MENU_ACTION_START || MENU_ACTION_CANCEL || MENU_ACTION_SELECT))
+		if (menuAction == MENU_ACTION_START || menuAction == MENU_ACTION_CANCEL || menuAction == MENU_ACTION_SELECT)
 		{
 			isBreakWhile = true;
 		}
 	}
 
-	menuActionReset();
 
 	// load submenu if seleced
 	if ((menuAction == MENU_ACTION_SELECT) && (getSelectedElementId() == 0))
 	{
+		debug(F("calling starting protocolChooser\n"));
 		// load submenu ProtocolChooser
 		menuIdToShow = MENU_ID_PROTOCOL_CHOOSER;
 
 	}
-	else if (menuAction == (MENU_ACTION_START || MENU_ACTION_CANCEL))
+	else if (menuAction == MENU_ACTION_START || menuAction == MENU_ACTION_CANCEL)
 	{
+		debug(F("callingMenuNone\n"));
 		// clear display, end menu mode
 		menuIdToShow = MENU_ID_NONE;
 	}
+	menuActionReset();
+	debug (F("menuMain out\n"));
 }
 
-
+/**
+ * menu for choosing protocol
+ */
 void menuProtocolChooser()
 {
 	display.clear();
 	menuNumberOfEntries = 2;
+	resetMenuCursor();
 	displayWriteHeadline("Protocol");
 	displayWriteEntry(0, "LEGO");
 	displayWriteEntry(1, "BLE");
@@ -454,20 +498,21 @@ void menuProtocolChooser()
 	while (!isBreakWhile)
 	{
 		processMenuAction();
-		if (menuAction == (MENU_ACTION_CANCEL || MENU_ACTION_SELECT || MENU_ACTION_START))
+		debug (menuAction);
+		if (menuAction == MENU_ACTION_CANCEL || menuAction == MENU_ACTION_SELECT || menuAction == MENU_ACTION_START)
 		{
 			isBreakWhile = true;
 		}
 	}
 
-	menuActionReset();
-	if (menuAction == (MENU_ACTION_SELECT && (getSelectedElementId() == 0)))
+
+	if ((menuAction == MENU_ACTION_SELECT) && (getSelectedElementId() == 0))
 	{
 		// LEGO selected
 		// not implemented yet
 
 	}
-	else if (menuAction == (MENU_ACTION_SELECT && (getSelectedElementId() == 1)))
+	else if ((menuAction == MENU_ACTION_SELECT) && (getSelectedElementId() == 1))
 	{
 		// BLE selected
 		// initiate BLE scan
@@ -483,6 +528,7 @@ void menuProtocolChooser()
 		// end menu
 		menuIdToShow = MENU_ID_NONE;
 	}
+	menuActionReset();
 
 }
 
@@ -491,7 +537,7 @@ void menuProtocolChooser()
  */
 void displayPrintMenuCursor ()
 {
-	for (uint8_t i=0; i< DISPLAY_NUMBER_OF_LINES; i++)
+	for (uint8_t i=2; i< DISPLAY_NUMBER_OF_LINES; i++)
 	{
 		display.setCursor(0, i);
 		if (i != menuCursorUserY)
@@ -505,13 +551,70 @@ void displayPrintMenuCursor ()
 	}
 }
 
+
+/**
+ * menu for LEGO choose the Channel
+ */
+void menuLego()
+{
+	display.clear();
+	resetMenuCursor();
+	menuNumberOfEntries=4;
+	displayWriteHeadline("LEGO");
+	displayWriteEntry(0, "CH 1");
+	displayWriteEntry(1, "CH 2");
+	displayWriteEntry(2, "CH 3");
+	displayWriteEntry(3, "CH 4");
+
+	bool isBreakWhile = false;
+		while (!isBreakWhile)
+		{
+
+			// process menu actions. Will return after we select, start, etc. is pressed.
+			processMenuAction();
+
+			if (menuAction == MENU_ACTION_START || menuAction == MENU_ACTION_CANCEL || menuAction == MENU_ACTION_SELECT)
+			{
+				isBreakWhile = true;
+			}
+		}
+
+
+		// load submenu if seleced
+		if (menuAction == MENU_ACTION_SELECT)
+		{
+			// initialize lego with the selected channel
+			pf.begin(LEGO_IR_PIN, getSelectedElementId());
+			menuIdToShow = MENU_ID_PROTOCOL_CHOOSER;
+
+		}
+		else if (menuAction == MENU_ACTION_START || menuAction == MENU_ACTION_CANCEL)
+		{
+			debug(F("callingMenuNone\n"));
+			// clear display, end menu mode
+			menuIdToShow = MENU_ID_NONE;
+		}
+		menuActionReset();
+		debug (F("menuMain out\n"));
+
+}
+
+
+/**
+ * menu for BLE scan
+ */
 void menuBleScan()
 {
 	display.clear();
+	resetMenuCursor();
 	displayWriteHeadline("BLE SCAN");
 	menuActionBleScan();
 }
 
+
+/**
+ * advanced action for BLE Scan menu
+ */
 void menuActionBleScan ()
 {
 	//debug (F("in blescan"));
@@ -616,13 +719,13 @@ void menuActionBleScan ()
 		processMenuAction();
 		menuNumberOfEntries = index;
 
-		if (menuAction == (MENU_ACTION_CANCEL || MENU_ACTION_SELECT || MENU_ACTION_START))
+		if (menuAction == MENU_ACTION_CANCEL || menuAction == MENU_ACTION_SELECT || menuAction == MENU_ACTION_START)
 		{
 			isBreakWhile = true;
 		}
 	}
 
-	menuActionReset();
+
 
 	if (menuAction == MENU_ACTION_SELECT)
 	{
@@ -667,7 +770,7 @@ void menuActionBleScan ()
 		// end menu
 		menuIdToShow = MENU_ID_NONE;
 	}
-
+	menuActionReset();
 	printSerialFreeMemory();
 	debug(F("out of blescan"));
 }
@@ -678,10 +781,15 @@ void menuActionBleScan ()
  */
 void menuRouter()
 {
+	debug (F("menuRouter in\nMenuIdToShow: "));
+	debug (menuIdToShow);
+	debug (F("\n"));
+
 	switch (menuIdToShow)
 	{
 		case MENU_ID_NONE:
 			isMenuMode = false;
+			display.clear();
 			break;
 
 		case MENU_ID_MAIN:
@@ -696,7 +804,12 @@ void menuRouter()
 			menuProtocolChooser();
 			break;
 
+		case MENU_ID_LEGO:
+			menuLego();
+			break;
+
 	}
+	debug (F("menuRouter out\n"));
 }
 
 
@@ -984,22 +1097,22 @@ uint8_t calculateStickValueWithDeadZoneAndTrim (byte stickIdentifier)
 	{
 		case PSS_LX:
 		{
-			trim = sticksTrim[TRIM_LX];
+			trim = sticksTrim[STICK_LX];
 			break;
 		}
 		case PSS_LY:
 		{
-			trim = sticksTrim[TRIM_LY];
+			trim = sticksTrim[STICK_LY];
 			break;
 		}
 		case PSS_RX:
 		{
-			trim = sticksTrim[TRIM_RX];
+			trim = sticksTrim[STICK_RX];
 			break;
 		}
 		case PSS_RY:
 		{
-			trim = sticksTrim[TRIM_RY];
+			trim = sticksTrim[STICK_RY];
 			break;
 		}
 	}
@@ -1039,19 +1152,19 @@ uint8_t calculateStickValueWithDeadZoneAndTrim (byte stickIdentifier)
 //	Serial.println(value);
 
 	// apply reverse
-	if (stickReverse[TRIM_LX] && stickIdentifier == PSS_LX)
+	if (stickReverse[STICK_LX] && stickIdentifier == PSS_LX)
 	{
 		value = map(value,0,255,255,0);
 	}
-	else if (stickReverse[TRIM_RX] && stickIdentifier == PSS_RX)
+	else if (stickReverse[STICK_RX] && stickIdentifier == PSS_RX)
 	{
 		value = map(value,0,255,255,0);
 	}
-	else if (stickReverse[TRIM_LY] && stickIdentifier == PSS_LY)
+	else if (stickReverse[STICK_LY] && stickIdentifier == PSS_LY)
 	{
 		value = map(value,0,255,255,0);
 	}
-	else if (stickReverse[TRIM_RY] && stickIdentifier == PSS_RY)
+	else if (stickReverse[STICK_RY] && stickIdentifier == PSS_RY)
 	{
 		value = map(value,0,255,255,0);
 	}
@@ -1067,22 +1180,22 @@ uint8_t calculateStickValueWithDeadZoneAndTrim (byte stickIdentifier)
  */
 void processTrimChange()
 {
-	if (ps2x.Button(PSB_PAD_RIGHT) && sticksTrim[TRIM_RX] < 127)
+	if (ps2x.Button(PSB_PAD_RIGHT) && sticksTrim[STICK_RX] < 127)
 	{
-		sticksTrim[TRIM_RX] = sticksTrim[TRIM_RX] +1;
+		sticksTrim[STICK_RX] = sticksTrim[STICK_RX] +1;
 	}
-	else if (ps2x.Button(PSB_PAD_LEFT) && sticksTrim[TRIM_RX] > -126)
+	else if (ps2x.Button(PSB_PAD_LEFT) && sticksTrim[STICK_RX] > -126)
 	{
-		sticksTrim[TRIM_RX] = sticksTrim[TRIM_RX] -1;
+		sticksTrim[STICK_RX] = sticksTrim[STICK_RX] -1;
 	}
 
-	if (ps2x.Button(PSB_PAD_UP) && sticksTrim[TRIM_LY] < 127)
+	if (ps2x.Button(PSB_PAD_UP) && sticksTrim[STICK_LY] < 127)
 	{
-		sticksTrim[TRIM_LY] = sticksTrim[TRIM_LY] +1;
+		sticksTrim[STICK_LY] = sticksTrim[STICK_LY] +1;
 	}
-	else if (ps2x.Button(PSB_PAD_DOWN) && sticksTrim[TRIM_LY] > -126)
+	else if (ps2x.Button(PSB_PAD_DOWN) && sticksTrim[STICK_LY] > -126)
 	{
-		sticksTrim[TRIM_LY] = sticksTrim[TRIM_LY] -1;
+		sticksTrim[STICK_LY] = sticksTrim[STICK_LY] -1;
 	}
 
 }
@@ -1102,7 +1215,7 @@ void processCursorNavigation()
 	}
 	else if (ps2x.ButtonPressed(PSB_PAD_DOWN))
 	{
-		if ((menuCursorUserY < DISPLAY_NUMBER_OF_LINES -1 ) && (menuCursorUserY < 1+ menuNumberOfEntries - 1))
+		if ((menuCursorUserY < DISPLAY_NUMBER_OF_LINES -1 ) && (menuCursorUserY < 2+ menuNumberOfEntries - 1))
 		{
 			menuCursorUserY++;
 			isCursorChanged=true;
@@ -1121,7 +1234,7 @@ void processCursorNavigation()
  * processes the buttons when you are in menu.
  * cross:   cancel (one level up)
  * square:  select / OK
- * circle:  alternative ection (like edit)
+ * circle:  alternative selection (like edit)
  * start:   close menu
  */
 void processMenuAction()
@@ -1160,10 +1273,50 @@ void processMenuAction()
 	}
 }
 
+uint8_t applyExpoValue(uint8_t inputValue, uint8_t stickIdentifier)
+{
+	float expo=1;
+
+	switch (stickIdentifier)
+	{
+		case PSS_LX:
+		{
+			expo = sticksTrim[STICK_LX];
+			break;
+		}
+		case PSS_LY:
+		{
+			expo = sticksTrim[STICK_LY];
+			break;
+		}
+		case PSS_RX:
+		{
+			expo = sticksTrim[STICK_RX];
+			break;
+		}
+		case PSS_RY:
+		{
+			expo = sticksTrim[STICK_RY];
+			break;
+		}
+	}
+
+	if (inputValue > 127)
+	{
+		long test = map(inputValue, 128, 255, 0, 100);
+
+	}
+
+
+	return 0;
+
+}
 
 
 void loop()
 {
+	// update voltage on display
+	displayVoltage();
 
 
 	/* You must Read Gamepad to get new values and set vibration values
@@ -1173,10 +1326,11 @@ void loop()
 	 */
 
 	ps2x.read_gamepad(false, vibrate); //read controller and set large motor to spin at 'vibrate' speed
-	if (ps2x.ButtonPressed(PSB_START))
+	if (ps2x.ButtonReleased(PSB_START))
 	{
 		// enable menuMode
 		isMenuMode = true;
+		menuIdToShow = MENU_ID_MAIN;
 	}
 
 	// check if we are in menu mode
