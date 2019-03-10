@@ -9,6 +9,7 @@
 
 
 
+
 /* define debug stuff */
 #define DEBUG_FREE_MEMORY 0
 #define DEBUG_BLE_AT 1
@@ -169,7 +170,7 @@ FastCRC8 CRC8;
 #define STICK_RX 2
 #define STICK_RY 3
 char sticksTrim[] = {0,0,0,0};
-float sticksExpo[] = {1.0,1.0,1.0,1.0};
+float sticksExpo[] = {2.0,1.0,2.0,1.0};
 
 bool stickReverse[] = {false,false,false,false};
 
@@ -1024,13 +1025,16 @@ void sendCurrentPsxState()
 
 		// sticks
 		//values[PROT_STICK_LX] = ps2x.Analog(PSS_LX);
-		values[PROT_STICK_LX] = calculateStickValueWithDeadZoneAndTrim(PSS_LX);
+		//values[PROT_STICK_LX] = calculateStickValueWithDeadZoneAndTrim(PSS_LX);
+		values[PROT_STICK_LX] = applyExpoValue(calculateStickValueWithDeadZoneAndTrim(PSS_LX),PSS_LX);
 		//values[PROT_STICK_LY] = ps2x.Analog(PSS_LY);
-		values[PROT_STICK_LY] = calculateStickValueWithDeadZoneAndTrim(PSS_LY);
+		//values[PROT_STICK_LY] = calculateStickValueWithDeadZoneAndTrim(PSS_LY);
+		values[PROT_STICK_LY] = applyExpoValue(calculateStickValueWithDeadZoneAndTrim(PSS_LY),PSS_LY) ;
 		// values[PROT_STICK_RX] = ps2x.Analog(PSS_RX);
-		values[PROT_STICK_RX] = calculateStickValueWithDeadZoneAndTrim(PSS_RX);
+		//values[PROT_STICK_RX] = calculateStickValueWithDeadZoneAndTrim(PSS_RX);
+		values[PROT_STICK_RX] = applyExpoValue(calculateStickValueWithDeadZoneAndTrim(PSS_RX), PSS_RX);
 		// values[PROT_STICK_RY] = ps2x.Analog(PSS_RY);
-		values[PROT_STICK_RY] = calculateStickValueWithDeadZoneAndTrim(PSS_RY);
+		values[PROT_STICK_RY] = applyExpoValue(calculateStickValueWithDeadZoneAndTrim(PSS_RY),PSS_RY) ;
 
 		// top buttons
 		values[PROT_BTN_SQUARE] = ps2x.Analog(PSAB_SQUARE);
@@ -1083,14 +1087,7 @@ void sendCurrentPsxState()
  */
 uint8_t calculateStickValueWithDeadZoneAndTrim (byte stickIdentifier)
 {
-
-
 	signed int value = ps2x.Analog(stickIdentifier);
-
-//	Serial.print("ID: ");
-//	Serial.print(stickIdentifier);
-//	Serial.print(" value: ");
-//	Serial.print(value);
 
 	char trim = 0;
 	switch (stickIdentifier)
@@ -1143,13 +1140,6 @@ uint8_t calculateStickValueWithDeadZoneAndTrim (byte stickIdentifier)
 		value = 255;
 	}
 
-
-//	Serial.print(" deadZone: ");
-//	Serial.print((int) DEAD_ZONE);
-//	Serial.print(" trim: ");
-//	Serial.print(trim, DEC);
-//	Serial.print(" result : ");
-//	Serial.println(value);
 
 	// apply reverse
 	if (stickReverse[STICK_LX] && stickIdentifier == PSS_LX)
@@ -1273,6 +1263,10 @@ void processMenuAction()
 	}
 }
 
+
+/**
+ * add expo value
+ */
 uint8_t applyExpoValue(uint8_t inputValue, uint8_t stickIdentifier)
 {
 	float expo=1;
@@ -1281,36 +1275,71 @@ uint8_t applyExpoValue(uint8_t inputValue, uint8_t stickIdentifier)
 	{
 		case PSS_LX:
 		{
-			expo = sticksTrim[STICK_LX];
+			expo = sticksExpo[STICK_LX];
 			break;
 		}
 		case PSS_LY:
 		{
-			expo = sticksTrim[STICK_LY];
+			expo = sticksExpo[STICK_LY];
 			break;
 		}
 		case PSS_RX:
 		{
-			expo = sticksTrim[STICK_RX];
+			expo = sticksExpo[STICK_RX];
 			break;
 		}
 		case PSS_RY:
 		{
-			expo = sticksTrim[STICK_RY];
+			expo = sticksExpo[STICK_RY];
 			break;
 		}
 	}
 
+//	debug (F("input="));
+//	debug (inputValue);
+//	debug (F("  "));
+//	debug(F("expo="));
+//	debug(expo);
+//	debug (F(" "));
+
+
+	// map is only working with long values, not with float. So we use range from 0 to 1000, which means 3 decimal values;
+	float  inputValue1000=0;
 	if (inputValue > 127)
 	{
-		long test = map(inputValue, 128, 255, 0, 100);
-
+		 inputValue1000 = map(inputValue, 128, 255, 0, 1000);
+	}
+	else if  (inputValue < 127)
+	{
+		 inputValue1000 = map(inputValue, 126, 0, 0, 1000);
 	}
 
 
-	return 0;
+	//float withExpo = ((inputValue1000/1000) ^ expo)*1000;
+	float withExpo = pow(inputValue1000/1000, expo)*1000;
+
+//	debug (F("with expo="));
+//	debug (withExpo);
+
+	if (inputValue > 127)
+	{
+		inputValue =  map(withExpo, 0,1000,128,255);
+	}
+	else if (inputValue < 127)
+	{
+		inputValue =  map(withExpo, 0,1000,126,0);
+	}
+
+//	debug (F(" final"));
+//	debug (inputValue);
+//	debug (F("\n"));
+
+	return inputValue;
 
 }
+
+
+
 
 
 void loop()
