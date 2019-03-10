@@ -9,11 +9,14 @@
 
 
 
-
 /* define debug stuff */
 #define DEBUG_FREE_MEMORY 0
 #define DEBUG_BLE_AT 1
+#define DEBUG_BLE_PACKET_NUMBER 1
+#define DEBUG_BLE_SEND 1
 #define DEBUG 1
+#define DEBUG_SERIAL Serial
+#define DEBUG_BAUD 57600
 
 
 
@@ -53,6 +56,8 @@ unsigned long lastVoltagePrinted=0;
 #define BLE_CONNECT_ERROR_CODE_ERROR 1
 #define BLE_CONNECT_ERROR_CODE_FAIL 2
 
+uint8_t blePacketNumber=0; // packet number for BLE
+
 
 /* LEGO */
 LegoIr pf;
@@ -60,7 +65,7 @@ LegoIr pf;
 
 
 /* SERIAL */
-#define SERIAL_BAUD 19200
+#define SERIAL_BAUD 57600
 
 
 
@@ -155,7 +160,8 @@ SoftwareSerial bleSerial (BT_RX, BT_TX); // RX, TX
 //#define PROT_LF 18
 
 // BT send interval
-#define BT_MIN_SEND_INTERVAL_MILLIS 50
+//#define BT_MIN_SEND_INTERVAL_MILLIS 50
+#define BT_MIN_SEND_INTERVAL_MILLIS 60
 //#define BT_MIN_SEND_INTERVAL_MILLIS 300
 unsigned long btLastSend=0;
 
@@ -163,7 +169,7 @@ unsigned long btLastSend=0;
 FastCRC8 CRC8;
 
 // stick adjustment
-#define DEAD_ZONE 20
+#define DEAD_ZONE 25
 
 #define STICK_LX 0
 #define STICK_LY 1
@@ -267,8 +273,8 @@ void displayWriteEntry(uint8_t lineNumber, char* stringToWrite)
 
 void setup() {
 
-	Serial.begin(SERIAL_BAUD);
-	Serial.println(F("starting"));
+	DEBUG_SERIAL.begin(DEBUG_BAUD);
+	DEBUG_SERIAL.println(F("starting"));
 
 	stickReverse[STICK_LY]=true;
 	display.begin();
@@ -296,35 +302,35 @@ void setup() {
 
 		if (error == 0)
 		{
-			Serial.print(F("Found Controller, configured successful "));
-			Serial.print(F("pressures = "));
+			DEBUG_SERIAL.print(F("Found Controller, configured successful "));
+			DEBUG_SERIAL.print(F("pressures = "));
 			if (pressures)
-				Serial.println(F("true "));
+				DEBUG_SERIAL.println(F("true "));
 			else
-				Serial.println(F("false"));
-			Serial.print("rumble = ");
+				DEBUG_SERIAL.println(F("false"));
+			DEBUG_SERIAL.print("rumble = ");
 			if (rumble)
-				Serial.println("true)");
+				DEBUG_SERIAL.println("true)");
 			else {
-				Serial.println("false");
-				Serial.println(F("Try out all the buttons, X will vibrate the controller, faster as you press harder;"));
-				Serial.println(
+				DEBUG_SERIAL.println("false");
+				DEBUG_SERIAL.println(F("Try out all the buttons, X will vibrate the controller, faster as you press harder;"));
+				DEBUG_SERIAL.println(
 						"holding L1 or R1 will print out the analog stick values.");
-				Serial.println(F("Note: Go to www.billporter.info for updates and to report bugs."));
+				DEBUG_SERIAL.println(F("Note: Go to www.billporter.info for updates and to report bugs."));
 			}
 		}
 		else if (error == 1)
 		{
-			Serial.println(F("No controller found, check wiring, see readme.txt to enable debug. visit www.billporter.info for troubleshooting tips"));
+			DEBUG_SERIAL.println(F("No controller found, check wiring, see readme.txt to enable debug. visit www.billporter.info for troubleshooting tips"));
 		}
 		else if (error == 2)
 		{
-			Serial.println(F("Controller found but not accepting commands. see readme.txt to enable debug. Visit www.billporter.info for troubleshooting tips"));
+			DEBUG_SERIAL.println(F("Controller found but not accepting commands. see readme.txt to enable debug. Visit www.billporter.info for troubleshooting tips"));
 		}
 
 		else if (error == 3)
 		{
-			Serial.println(F("Controller refusing to enter Pressures mode, may not support it. "));
+			DEBUG_SERIAL.println(F("Controller refusing to enter Pressures mode, may not support it. "));
 		}
 
 
@@ -353,21 +359,21 @@ void setup() {
 	display.drawString(1, 0, "controller");
 	display.drawString(3, 1, "found");
 
-	Serial.print(ps2x.Analog(PSS_LX), DEC);
-	Serial.print(" ");
-	Serial.print(ps2x.Analog(PSS_LY), DEC);
-	Serial.print(" ");
-	Serial.print(ps2x.Analog(PSS_RX), DEC);
-	Serial.print(" ");
-	Serial.print(ps2x.Analog(PSS_RY), DEC);
-	Serial.print("\n");
+	DEBUG_SERIAL.print(ps2x.Analog(PSS_LX), DEC);
+	DEBUG_SERIAL.print(" ");
+	DEBUG_SERIAL.print(ps2x.Analog(PSS_LY), DEC);
+	DEBUG_SERIAL.print(" ");
+	DEBUG_SERIAL.print(ps2x.Analog(PSS_RX), DEC);
+	DEBUG_SERIAL.print(" ");
+	DEBUG_SERIAL.print(ps2x.Analog(PSS_RY), DEC);
+	DEBUG_SERIAL.print("\n");
 
 
 	//delay(2000);
 	bleSerial.begin(BLE_BAUDRATE);
 	delay(BLE_AT_DELAY);
 
-	Serial.println(F("AT"));
+	DEBUG_SERIAL.println(F("AT"));
 	bleSerial.println(F("AT"));
 	delay(BLE_AT_DELAY);
 	bleReadSerialLogOnly();
@@ -376,7 +382,7 @@ void setup() {
 	delay(BLE_AT_DELAY);
 	bleReadSerialLogOnly();
 
-	Serial.println(F("AT+ROLE1"));
+	DEBUG_SERIAL.println(F("AT+ROLE1"));
 	bleSerial.println(F("AT+ROLE1"));
 	delay(BLE_AT_DELAY);
 	bleReadSerialLogOnly();
@@ -385,17 +391,17 @@ void setup() {
 //	delay(200);
 //	bleReadSerial();
 
-	Serial.println(F("AT+POWE2"));
+	DEBUG_SERIAL.println(F("AT+POWE2"));
 	bleSerial.println(F("AT+POWE2"));
 	delay(BLE_AT_DELAY);
 	bleReadSerialLogOnly();
 
-	Serial.println(F("AT+NOTI1"));
+	DEBUG_SERIAL.println(F("AT+NOTI1"));
 	bleSerial.println(F("AT+NOTI1"));
 	delay(BLE_AT_DELAY);
 	bleReadSerialLogOnly();
 
-	Serial.println(F("AT+RESET"));
+	DEBUG_SERIAL.println(F("AT+RESET"));
 	bleSerial.println(F("AT+RESET"));
 	delay(BLE_AT_DELAY);
 	bleReadSerialLogOnly();
@@ -404,7 +410,7 @@ void setup() {
 
 
 
-	Serial.println(F("AT+NAMESENDER"));
+	DEBUG_SERIAL.println(F("AT+NAMESENDER"));
 	bleSerial.println(F("AT+NAMESENDER"));
 	delay(BLE_AT_DELAY);
 	bleReadSerialLogOnly();
@@ -416,7 +422,7 @@ void setup() {
 
 	//bleScan();
 
-	Serial.println(F("setup end"));
+	DEBUG_SERIAL.println(F("setup end"));
 }
 
 
@@ -1020,6 +1026,15 @@ void sendCurrentPsxState()
 	// only send if enough time has been between the last send and now
 	if (btLastSend + BT_MIN_SEND_INTERVAL_MILLIS < millis())
 	{
+		// increase the packet number for this BLE packet
+		blePacketNumber++;
+
+
+		// packetnumber will go from 1 to 255
+		if (blePacketNumber == 0)
+		{
+			blePacketNumber++;
+		}
 
 		uint8_t values[PROT_ARRAY_LENGTH];
 
@@ -1055,13 +1070,14 @@ void sendCurrentPsxState()
 		values[PROT_RIGHT] = ps2x.Analog(PSAB_PAD_RIGHT);
 
 		// digital buttons
-		values[PROT_DIGITAL_BUTTONS]=0;
-		bitWrite(values[PROT_DIGITAL_BUTTONS], PROT_DIGITAL_START, ps2x.Button(PSB_START));
-		bitWrite(values[PROT_DIGITAL_BUTTONS], PROT_DIGITAL_SELECT, ps2x.Button(PSB_SELECT));
-		bitWrite(values[PROT_DIGITAL_BUTTONS], PROT_DIGITAL_STICK_BTN_L, ps2x.Button(PSB_L3));
-		bitWrite(values[PROT_DIGITAL_BUTTONS], PROT_DIGITAL_STICK_BTN_R, ps2x.Button(PSB_R3));
+//		values[PROT_DIGITAL_BUTTONS]=0;
+//		bitWrite(values[PROT_DIGITAL_BUTTONS], PROT_DIGITAL_START, ps2x.Button(PSB_START));
+//		bitWrite(values[PROT_DIGITAL_BUTTONS], PROT_DIGITAL_SELECT, ps2x.Button(PSB_SELECT));
+//		bitWrite(values[PROT_DIGITAL_BUTTONS], PROT_DIGITAL_STICK_BTN_L, ps2x.Button(PSB_L3));
+//		bitWrite(values[PROT_DIGITAL_BUTTONS], PROT_DIGITAL_STICK_BTN_R, ps2x.Button(PSB_R3));
 
-
+		// debug dont send digital buttons. Use this as messageId
+		values[PROT_DIGITAL_BUTTONS] = blePacketNumber;
 
 		//Serial.println("sending");
 		// calculate crc
@@ -1074,10 +1090,47 @@ void sendCurrentPsxState()
 		// send newline (only for hterm debugging. will be removed later)
 //		bleSerial.write("\r\n");
 		// remember time of last send
+
+		#if DEBUG_BLE_SEND == 1
+			unsigned long currentTime = millis();
+			DEBUG_SERIAL.print(currentTime - btLastSend);
+			DEBUG_SERIAL.print(F(" - "));
+			DEBUG_SERIAL.print(currentTime);
+			DEBUG_SERIAL.print(F(" - "));
+
+			for (uint8_t i=0; i< sizeof(values); i++)
+			{
+				DEBUG_SERIAL.print(values[i], HEX);
+				//DEBUG_SERIAL.print(" ");
+			}
+			DEBUG_SERIAL.print(myCRC, HEX);
+			DEBUG_SERIAL.print("\r\n");
+		#endif
 		btLastSend = millis();
-//		Serial.write(values, sizeof(values));
-//		Serial.write(myCRC);
-//		Serial.write("\r\n");
+	}
+}
+
+/**
+ * readIncomingBLE
+ */
+void readIncomingBLE ()
+{
+
+	if (bleSerial.available() > 0)
+	{
+
+		//char responseString[32];
+		//bleSerial.readBytes(responseString, sizeof responseString);
+		String responseString;
+		responseString = bleSerial.readString();
+
+
+
+		// debug response to serial
+		#if DEBUG_BLE_PACKET_NUMBER == 1
+			DEBUG_SERIAL.print("ack=");
+			DEBUG_SERIAL.println(responseString);
+		#endif
 
 	}
 }
@@ -1295,13 +1348,15 @@ uint8_t applyExpoValue(uint8_t inputValue, uint8_t stickIdentifier)
 		}
 	}
 
-//	debug (F("input="));
-//	debug (inputValue);
-//	debug (F("  "));
-//	debug(F("expo="));
-//	debug(expo);
-//	debug (F(" "));
-
+	if (stickIdentifier == PSS_RX)
+	{
+		debug (F("input="));
+		debug (inputValue);
+		debug (F("  "));
+		debug(F("expo="));
+		debug(expo);
+		debug (F(" "));
+	}
 
 	// map is only working with long values, not with float. So we use range from 0 to 1000, which means 3 decimal values;
 	float  inputValue1000=0;
@@ -1330,10 +1385,13 @@ uint8_t applyExpoValue(uint8_t inputValue, uint8_t stickIdentifier)
 		inputValue =  map(withExpo, 0,1000,126,0);
 	}
 
-//	debug (F(" final"));
-//	debug (inputValue);
-//	debug (F("\n"));
-
+	if (stickIdentifier == PSS_RX)
+	{
+		debug (F(" final"));
+		debug (inputValue);
+		debug (F(" - "));
+		// debug (F("\n"));
+	}
 	return inputValue;
 
 }
@@ -1346,6 +1404,7 @@ void loop()
 {
 	// update voltage on display
 	displayVoltage();
+
 
 
 	/* You must Read Gamepad to get new values and set vibration values
@@ -1369,7 +1428,8 @@ void loop()
 		menuRouter();
 	}
 
-
+		// read responses
+		readIncomingBLE();
 
 		// check if we are trimming now
 		processTrimChange();
