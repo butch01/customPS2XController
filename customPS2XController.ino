@@ -14,9 +14,9 @@
 #define DEBUG_BLE_AT 1
 #define DEBUG_BLE_PACKET_NUMBER 1
 #define DEBUG_BLE_SEND 1
-#define DEBUG 1
+#define DEBUG 0
 #define DEBUG_SERIAL Serial
-#define DEBUG_BAUD 57600
+#define DEBUG_BAUD 115200
 
 
 
@@ -218,7 +218,7 @@ void logBLEAT (String logString)
  */
 void debug (String logString)
 {
-	#ifdef DEBUG
+	#if DEBUG == 1
 	if (Serial.availableForWrite())
 	{
 		Serial.print (logString);
@@ -228,7 +228,7 @@ void debug (String logString)
 
 void debug (int integer)
 {
-	#ifdef DEBUG
+	#if DEBUG == 1
 	if (Serial.availableForWrite())
 	{
 		Serial.print (integer);
@@ -1093,10 +1093,10 @@ void sendCurrentPsxState()
 
 		#if DEBUG_BLE_SEND == 1
 			unsigned long currentTime = millis();
-			DEBUG_SERIAL.print(currentTime - btLastSend);
-			DEBUG_SERIAL.print(F(" - "));
-			DEBUG_SERIAL.print(currentTime);
-			DEBUG_SERIAL.print(F(" - "));
+//			DEBUG_SERIAL.print(currentTime - btLastSend);
+//			DEBUG_SERIAL.print(F(" - "));
+//			DEBUG_SERIAL.print(currentTime);
+//			DEBUG_SERIAL.print(F(" - "));
 
 			for (uint8_t i=0; i< sizeof(values); i++)
 			{
@@ -1429,7 +1429,7 @@ void loop()
 	}
 
 		// read responses
-		readIncomingBLE();
+		//readIncomingBLE();
 
 		// check if we are trimming now
 		processTrimChange();
@@ -1462,45 +1462,10 @@ void loop()
 //			Serial.println("Select is being held");
 //
 //		}
-		if (ps2x.Button(PSB_PAD_UP))
-		{ //will be TRUE as long as button is pressed
-			Serial.print(F("Up held this hard: "));
-			Serial.println(ps2x.Analog(PSAB_PAD_UP), DEC);
-		}
-		if (ps2x.Button(PSB_PAD_RIGHT))
-		{
-			Serial.print(F("Right held this hard: "));
-			Serial.println(ps2x.Analog(PSAB_PAD_RIGHT), DEC);
-		}
-		if (ps2x.Button(PSB_PAD_LEFT))
-		{
-			Serial.print(F("LEFT held this hard: "));
-			Serial.println(ps2x.Analog(PSAB_PAD_LEFT), DEC);
-		}
-		if (ps2x.Button(PSB_PAD_DOWN))
-		{
-			Serial.print(F("DOWN held this hard: "));
-			Serial.println(ps2x.Analog(PSAB_PAD_DOWN), DEC);
-		}
 
-		if (ps2x.Button(PSAB_CIRCLE))
-		{
-			Serial.print(F("circle held this hard: "));
-			Serial.println(ps2x.Analog(PSAB_CIRCLE), DEC);
-		}
 
-		if (ps2x.Button(PSB_L2))
-		{
-//			Serial.print("L2 pressed: ");
-//			Serial.println(ps2x.Analog(PSAB_L2));
-			digitalWrite(13, HIGH);
-		}
-		else
-		{
-			digitalWrite(13, LOW);
 
-		}
-//		vibrate = ps2x.Analog(PSAB_CROSS); //this will set the large motor vibrate speed based on how hard you press the blue (X) button
+		//		vibrate = ps2x.Analog(PSAB_CROSS); //this will set the large motor vibrate speed based on how hard you press the blue (X) button
 //		if (ps2x.NewButtonState()) { //will be TRUE if any button changes state (on to off, or off to on)
 //			if (ps2x.Button(PSB_L3))
 //				Serial.println("L3 pressed");
