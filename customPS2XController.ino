@@ -406,15 +406,26 @@ void setup() {
 	delay(BLE_AT_DELAY);
 	bleReadSerialLogOnly();
 
-
-
-
-
 	DEBUG_SERIAL.println(F("AT+NAMESENDER"));
 	bleSerial.println(F("AT+NAMESENDER"));
 	delay(BLE_AT_DELAY);
 	bleReadSerialLogOnly();
 
+	DEBUG_SERIAL.println(F("AT+VERSION"));
+	bleSerial.println(F("AT+VERSION"));
+	delay(BLE_AT_DELAY);
+	bleReadSerialLogOnly();
+
+
+	DEBUG_SERIAL.println(F("AT+UUID"));
+	bleSerial.println(F("AT+UUID"));
+	delay(BLE_AT_DELAY);
+	bleReadSerialLogOnly();
+
+	DEBUG_SERIAL.println(F("AT+CHAR"));
+	bleSerial.println(F("AT+CHAR"));
+	delay(BLE_AT_DELAY);
+	bleReadSerialLogOnly();
 
 //	bleSerial.println("AT+CONA20C38FEF6C33");
 //	delay(2000);
@@ -649,6 +660,9 @@ void menuActionBleScan ()
 	int index = -1; // starting at -1. Will increment on first match if AT+DIS0
 	int lineNumber=0;
 	// read as long as response is not completely read
+	DEBUG_SERIAL.println("starting BLE Discovery");
+	unsigned long timeDiscoveryStarted=millis();
+
 	while (!isResponseCompletelyRead)
 	{
 		//printSerialFreeMemory();
@@ -692,6 +706,14 @@ void menuActionBleScan ()
 			lineNumber++;
 
 
+		}
+		// check for timeout
+		if (timeDiscoveryStarted + 15000 < millis())
+		{
+			// timeout
+			DEBUG_SERIAL.println("timeout during BLE Discovery");
+			menuIdToShow = MENU_ID_PROTOCOL_CHOOSER;
+			return;
 		}
 
 	}
@@ -855,8 +877,8 @@ uint8_t bleConnect(char *deviceAddress)
 	response.reserve(64);
 	Serial.println(F("Response: \n"));
 
-	while (!isBreakWhile)
-	{
+//	while (!isBreakWhile)
+//	{
 		Serial.println(bleSerial.available());
 		if (bleSerial.available() >0)
 		{
@@ -890,7 +912,7 @@ uint8_t bleConnect(char *deviceAddress)
 
 		}
 
-	}
+//	}
 	return returnCode;
 }
 
@@ -1020,6 +1042,30 @@ void displayMenu0()
 
 }
 
+void sendTestPenguinBot()
+{
+
+//	// only send if enough time has been between the last send and now
+//		if (btLastSend + BT_MIN_SEND_INTERVAL_MILLIS < millis())
+//		{
+	if (ps2x.ButtonPressed(PSAB_PAD_UP))
+	{
+		DEBUG_SERIAL.print("sending: f");
+		bleSerial.write("f");
+	}
+
+
+
+
+
+
+//			btLastSend = millis();
+//		}
+
+//	DEBUG_SERIAL.print("sending: f");
+//	bleSerial.write("f");
+//	delay(1000);
+}
 
 void sendCurrentPsxState()
 {
@@ -1428,15 +1474,16 @@ void loop()
 		menuRouter();
 	}
 
-		// read responses
-		//readIncomingBLE();
+	// read responses
+	//readIncomingBLE();
 
-		// check if we are trimming now
-		processTrimChange();
+	// check if we are trimming now
+	processTrimChange();
 
-		// send the values
-		sendCurrentPsxState();
-		//printDebug();
+	//sendTestPenguinBot();
+	// send the values
+	sendCurrentPsxState();
+//	printDebug();
 
 //		display.clearLine(0);
 //		display.setCursor(0, 0);
